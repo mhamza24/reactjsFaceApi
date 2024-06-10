@@ -1,82 +1,89 @@
-import {useRef,useEffect} from 'react'
-import './App.css'
-import * as faceapi from 'face-api.js'
+import { useRef, useEffect } from 'react';
+import './App.css';
+import * as faceapi from 'face-api.js';
 
-function App(){
-  const videoRef = useRef()
-  const canvasRef = useRef()
+function App() {
+  const videoRef = useRef();
+  const canvasRef = useRef();
 
-  // LOAD FROM USEEFFECT
-  useEffect(()=>{
-    startVideo()
-    videoRef && loadModels()
+  useEffect(() => {
+    startVideo();
+    loadModels();
+  }, []);
 
-  },[])
+  const startVideo = () => {
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then((currentStream) => {
+        videoRef.current.srcObject = currentStream;
+      })
+      .catch((err) => {
+        console.log(err);
+      });
+  };
 
-
-
-  // OPEN YOU FACE WEBCAM
-  const startVideo = ()=>{
-    navigator.mediaDevices.getUserMedia({video:true})
-    .then((currentStream)=>{
-      videoRef.current.srcObject = currentStream
-    })
-    .catch((err)=>{
-      console.log(err)
-    })
-  }
-  // LOAD MODELS FROM FACE API
-
-  const loadModels = ()=>{
+  const loadModels = () => {
     Promise.all([
-      // THIS FOR FACE DETECT AND LOAD FROM YOU PUBLIC/MODELS DIRECTORY
-      faceapi.nets.tinyFaceDetector.loadFromUri("/models"),
-      faceapi.nets.faceLandmark68Net.loadFromUri("/models"),
-      faceapi.nets.faceRecognitionNet.loadFromUri("/models"),
-      faceapi.nets.faceExpressionNet.loadFromUri("/models")
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+      faceapi.nets.faceExpressionNet.loadFromUri('/models'),
+      faceapi.nets.ssdMobilenetv1.loadFromUri('/models')
+    ]).then(() => {
+      faceMyDetect();
+    });
+  };
 
-      ]).then(()=>{
-      faceMyDetect()
-    })
-  }
+  const faceMyDetect = async () => {
+    const labeledDescriptors = await loadLabeledImages();
+    const faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.7);
 
-  const faceMyDetect = ()=>{
-    setInterval(async()=>{
-      const detections = await faceapi.detectAllFaces(videoRef.current,
-        new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceExpressions()
+    videoRef.current.addEventListener('play', () => {
+      const canvas = canvasRef.current;
+      faceapi.createCanvasFromMedia(videoRef.current);
+      const displaySize = { width: videoRef.current.videoWidth, height: videoRef.current.videoHeight };
+      faceapi.matchDimensions(canvas, displaySize);
 
-      // DRAW YOU FACE IN WEBCAM
-      canvasRef.current.innerHtml = faceapi.createCanvasFromMedia(videoRef.current)
-      faceapi.matchDimensions(canvasRef.current,{
-        width:940,
-        height:650
+      setInterval(async () => {
+        const detections = await faceapi.detectAllFaces(videoRef.current, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptors();
+        const resizedDetections = faceapi.resizeResults(detections, displaySize);
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+        const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
+
+        results.forEach((result, i) => {
+          console.log(`Detected: ${result.toString()}`);
+          const box = resizedDetections[i].detection.box;
+          const drawBox = new faceapi.draw.DrawBox(box, { label: result.toString() });
+          drawBox.draw(canvas);
+        });
+      }, 100);
+    });
+  };
+
+  const loadLabeledImages = () => {
+    const labels = ['Prashant Kumar', 'Captain America', 'Tony Stark', 'Muhammad Hamza Khalid', 'Khuzaima Ansari'];
+    return Promise.all(
+      labels.map(async (label) => {
+        const descriptions = [];
+        for (let i = 1; i <= 2; i++) {
+          const img = await faceapi.fetchImage(`/src/labeled_images/${label}/${i}.jpg`);
+          const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+          descriptions.push(detections.descriptor);
+        }
+        return new faceapi.LabeledFaceDescriptors(label, descriptions);
       })
-
-      const resized = faceapi.resizeResults(detections,{
-         width:940,
-        height:650
-      })
-
-      faceapi.draw.drawDetections(canvasRef.current,resized)
-      faceapi.draw.drawFaceLandmarks(canvasRef.current,resized)
-      faceapi.draw.drawFaceExpressions(canvasRef.current,resized)
-
-
-    },1000)
-  }
+    );
+  };
 
   return (
     <div className="myapp">
-    <h1>FAce Detection</h1>
-      <div className="appvide">
-        
-      <video crossOrigin="anonymous" ref={videoRef} autoPlay></video>
+      <h1>Face Detection</h1>
+      <div className="appvideo">
+        <video ref={videoRef} autoPlay muted width="940" height="650"></video>
+        <canvas ref={canvasRef} className="appcanvas" />
       </div>
-      <canvas ref={canvasRef} width="940" height="650"
-      className="appcanvas"/>
     </div>
-    )
-
+  );
 }
 
 export default App;
